@@ -96,24 +96,35 @@ SIMPLE_LOGIN_TEMPLATE = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     
     <style>
-        body {
+        body { 
             font-family: Arial, sans-serif;
-            background: linear-gradient(to left, #145DA0, #B1D4E0);
-            margin: 0;
+            margin: 0; 
+            overflow: hidden; 
             height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
         }
         
+        #skyline-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+        
         .login-container {
-            background: white;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(5px);
             padding: 2rem;
             border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             width: 90%;
             max-width: 360px;
             text-align: center;
+            z-index: 1;
         }
         
         h1 {
@@ -179,6 +190,7 @@ SIMPLE_LOGIN_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
+    <canvas id="skyline-canvas"></canvas>
     <div class="login-container">
         <h1>Protected File Server</h1>
         <form id="login-form">
@@ -249,6 +261,235 @@ SIMPLE_LOGIN_TEMPLATE = """<!DOCTYPE html>
                 document.close();
             }
         });
+    </script>
+
+    <script>
+        // Skyline animation code
+        (function() {
+            const canvas = document.getElementById('skyline-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Mouse tracking
+            let mouseX = canvas.width / 10;
+            let mouseY = canvas.height;
+            
+            document.addEventListener('mousemove', function(e) {
+                mouseX = e.pageX;
+                mouseY = e.pageY;
+            });
+            
+            // Utility functions
+            function random(min, max) { return Math.random() * (max - min) + min; }
+            const floor = Math.floor;
+            const round = Math.round;
+            
+            const skylines = [];
+            let dt = 1;
+            let lastTime = 0;
+            
+            // Building class
+            function Building(config) {
+                this.reset(config);
+            }
+            
+            Building.prototype.reset = function(config) {
+                this.layer = config.layer;
+                this.x = config.x;
+                this.y = config.y;
+                this.width = config.width;
+                this.height = config.height;
+                this.color = config.color;
+                
+                // 5% chance to deepen gray
+                if (Math.random() < 0.05) {
+                    const m = this.color.match(/hsl\\(200,\\s*(\\d+)%\\s*,\\s*(\\d+)%\\s*\\)/);
+                    if (m) {
+                        const s = parseInt(m[1], 10);
+                        let b = parseInt(m[2], 10);
+                        const delta = floor(random(10, 20));
+                        b = Math.max(0, b - delta);
+                        this.color = `hsl(200, ${s}%, ${b}%)`;
+                    }
+                }
+                
+                // Random roof details
+                this.slantedTop = floor(random(0, 10)) === 0;
+                this.slantedTopHeight = this.width / random(2, 4);
+                this.slantedTopDirection = round(random(0, 1)) === 0;
+                
+                this.spireTop = floor(random(0, 15)) === 0;
+                this.spireTopWidth = random(this.width * 0.01, this.width * 0.07);
+                this.spireTopHeight = random(10, 20);
+                
+                this.antennaTop = !this.spireTop && floor(random(0, 10)) === 0;
+                this.antennaTopWidth = this.layer / 2;
+                this.antennaTopHeight = random(5, 20);
+            };
+            
+            Building.prototype.render = function() {
+                ctx.fillStyle = ctx.strokeStyle = this.color;
+                ctx.lineWidth = 2;
+                
+                // Main rectangle
+                ctx.beginPath();
+                ctx.rect(this.x, this.y, this.width, this.height);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Slanted roof
+                if (this.slantedTop) {
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y);
+                    ctx.lineTo(this.x + this.width, this.y);
+                    if (this.slantedTopDirection) {
+                        ctx.lineTo(this.x + this.width, this.y - this.slantedTopHeight);
+                    } else {
+                        ctx.lineTo(this.x, this.y - this.slantedTopHeight);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+                
+                // Spire
+                if (this.spireTop) {
+                    ctx.beginPath();
+                    const midX = this.x + this.width / 2;
+                    ctx.moveTo(midX, this.y - this.spireTopHeight);
+                    ctx.lineTo(midX + this.spireTopWidth, this.y);
+                    ctx.lineTo(midX - this.spireTopWidth, this.y);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+                
+                // Antenna
+                if (this.antennaTop) {
+                    ctx.beginPath();
+                    const midX = this.x + this.width / 2;
+                    ctx.moveTo(midX, this.y - this.antennaTopHeight);
+                    ctx.lineTo(midX, this.y);
+                    ctx.lineWidth = this.antennaTopWidth;
+                    ctx.stroke();
+                    ctx.lineWidth = 2;
+                }
+            };
+            
+            // Skyline class
+            function Skyline(config) {
+                this.x = 0;
+                this.buildings = [];
+                this.layer = config.layer;
+                this.width = { min: config.width.min, max: config.width.max };
+                this.height = { min: config.height.min, max: config.height.max };
+                this.speed = config.speed;
+                this.color = config.color;
+                this.populate();
+            }
+            
+            Skyline.prototype.populate = function() {
+                let total = 0;
+                while (total <= canvas.width + this.width.max * 2) {
+                    const w = round(random(this.width.min, this.width.max));
+                    const h = round(random(this.height.min, this.height.max));
+                    const lastX = this.buildings.length
+                        ? this.buildings[this.buildings.length - 1].x + this.buildings[this.buildings.length - 1].width
+                        : 0;
+                    this.buildings.push(
+                        new Building({
+                            layer: this.layer,
+                            x: lastX,
+                            y: canvas.height - h,
+                            width: w,
+                            height: h,
+                            color: this.color
+                        })
+                    );
+                    total += w;
+                }
+            };
+            
+            Skyline.prototype.update = function() {
+                this.x -= mouseX * this.speed * dt;
+                const first = this.buildings[0];
+                if (first.x + first.width + this.x < 0) {
+                    const w = round(random(this.width.min, this.width.max));
+                    const h = round(random(this.height.min, this.height.max));
+                    const last = this.buildings[this.buildings.length - 1];
+                    first.reset({
+                        layer: this.layer,
+                        x: last.x + last.width,
+                        y: canvas.height - h,
+                        width: w,
+                        height: h,
+                        color: this.color
+                    });
+                    this.buildings.push(this.buildings.shift());
+                }
+            };
+            
+            Skyline.prototype.render = function() {
+                ctx.save();
+                ctx.translate(this.x, (canvas.height - mouseY) / 20 * this.layer);
+                for (let i = this.buildings.length - 1; i >= 0; i--) {
+                    this.buildings[i].render();
+                }
+                ctx.restore();
+            };
+            
+            // Initialize skylines
+            function init() {
+                for (let i = 5; i > 0; i--) {
+                    skylines.push(
+                        new Skyline({
+                            layer: i,
+                            width: { min: i * 30, max: i * 40 },
+                            height: { min: 150 - (i - 1) * 35, max: 300 - (i - 1) * 35 },
+                            speed: i * 0.003,
+                            color: `hsl(200, ${(i) + 10}%, ${75 - (i - 1) * 13}%)`
+                        })
+                    );
+                }
+            }
+            
+            // Animation loop
+            function animate(currentTime) {
+                if (!lastTime) lastTime = currentTime;
+                
+                dt = (currentTime - lastTime) < 100 ? 0.1 : (currentTime - lastTime) / 16;
+                dt = dt > 5 ? 5 : dt;
+                lastTime = currentTime;
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                for (let i = skylines.length - 1; i >= 0; i--) {
+                    skylines[i].update();
+                    skylines[i].render();
+                }
+                
+                requestAnimationFrame(animate);
+            }
+            
+            // Start animation
+            init();
+            requestAnimationFrame(animate);
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                skylines.forEach(skyline => {
+                    skyline.buildings = [];
+                    skyline.populate();
+                });
+            });
+        })();
     </script>
 </body>
 </html>
@@ -334,7 +575,7 @@ def process_dir(top_dir, password, opts):
                     login_html = SIMPLE_LOGIN_TEMPLATE
                     login_html = login_html.replace('{{ encrypted_content }}', encoded_content)
                     login_html = login_html.replace('{{ password_hash }}', password_hash)
-                    login_html = login_html.replace('{{ footer_text }}', opts.footer or "(c) File Server")
+                    login_html = login_html.replace('{{ footer_text }}', opts.footer or "(c) Sourav Mishra")
                     
                     with open(abs_path, "w") as index_file:
                         index_file.write(login_html)
